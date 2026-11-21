@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "icloud-mail-readonly-mcp"
+version = "0.1.0"
+description = "A bounded, read-only iCloud Mail MCP stdio server"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+icloud-mail-readonly-mcp = "icloud_mail_readonly.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/icloud_mail_readonly"]
