@@ -6,7 +6,7 @@ import ssl
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -201,7 +201,7 @@ def parse_ics(raw):
     event = {}
     ignored = {'ATTACH', 'X-APPLE-STRUCTURED-LOCATION', 'X-WR-CALNAME', 'METHOD', 'PRODID', 'CALSCALE', 'VERSION'}
     recurring = {'RRULE', 'RDATE', 'EXDATE', 'RECURRENCE-ID'}
-    allowed = {'UID', 'DTSTART', 'DTEND', 'SUMMARY', 'DESCRIPTION', 'LOCATION'}
+    allowed = {'UID', 'DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'DESCRIPTION', 'LOCATION'}
     has_recurrence = False
     for line in lines[start + 1:end]:
         if ':' not in line:
@@ -228,10 +228,10 @@ def parse_ics(raw):
         if name not in allowed or name in event:
             raise CalendarError('Unsupported calendar event')
         event[name] = (value, params) if name in {'DTSTART', 'DTEND'} else value
-    if not {'UID', 'DTSTART', 'DTEND'} <= set(event):
+    if not {'UID', 'DTSTART'} <= set(event) or ('DTEND' in event and 'DURATION' in event) or not ({'DTEND', 'DURATION'} & set(event)):
         raise CalendarError('Invalid calendar event')
     start_dt, all_day = _ical_datetime(*event['DTSTART'])
-    end_dt, _ = _ical_datetime(*event['DTEND'])
+    end_dt = _ical_datetime(*event['DTEND'])[0] if 'DTEND' in event else start_dt + _duration(event['DURATION'])
     if end_dt <= start_dt:
         raise CalendarError('Invalid calendar event')
     result = {'uid': event['UID'][:255], 'start': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'), 'end': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'), 'summary': _unescape(event.get('SUMMARY', ''))}
@@ -275,6 +275,17 @@ def _ical_datetime(value, params):
         return datetime.strptime(value, '%Y%m%dT%H%M%S').replace(tzinfo=zone).astimezone(timezone.utc), False
     except ValueError:
         raise CalendarError('Invalid calendar event') from None
+
+
+def _duration(value):
+    match = re.fullmatch(r'P(?:(\d{1,4})W)?(?:(\d{1,4})D)?(?:T(?:(\d{1,3})H)?(?:(\d{1,3})M)?(?:(\d{1,3})S)?)?', value or '')
+    if not match or not any(match.groups()):
+        raise CalendarError('Unsupported event duration')
+    weeks, days, hours, minutes, seconds = (int(part or 0) for part in match.groups())
+    delta = timedelta(weeks=weeks, days=days, hours=hours, minutes=minutes, seconds=seconds)
+    if delta <= timedelta(0) or delta > timedelta(days=400):
+        raise CalendarError('Unsupported event duration')
+    return delta
 
 
 def serialize_ics(fields, uid=None):
@@ -426,7 +437,7 @@ class CalendarClient:
         status, _, data = self._request('REPORT', calendar_path, {'Depth': '1', 'Content-Type': 'application/xml'}, body)
         if status != 207:
             raise CalendarError('Event listing failed')
-        events, skipped = [], 0
+        events, skipped, reasons = [], 0, {}
         for response in self._xml(data).findall('{DAV:}response'):
             href, etag = response.findtext('{DAV:}href'), response.findtext('.//{DAV:}getetag')
             raw = response.findtext('.//{urn:ietf:params:xml:ns:caldav}calendar-data')
@@ -436,13 +447,14 @@ class CalendarClient:
             try:
                 event = parse_ics(raw.encode('utf-8'))
                 etag = _strong_etag(etag)
-            except CalendarError:
+            except CalendarError as exc:
                 skipped += 1
+                reasons[str(exc)] = reasons.get(str(exc), 0) + 1
                 continue
             events.append({'event_id': encode_id(path), 'etag': etag, **event})
         if len(events) > MAX_EVENTS:
             raise CalendarError('Too many events')
-        return {'events': events, **({'skipped': skipped} if skipped else {})}
+        return {'events': events, **({'skipped': skipped, 'skipped_reasons': reasons} if skipped else {})}
 
     def get_event(self, calendar_id, event_id):
         path = self._event_path(self._calendar_path(calendar_id), event_id)
