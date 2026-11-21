@@ -219,7 +219,7 @@ def parse_ics(raw):
     has_recurrence = len(blocks) > 1
     for line in event_lines:
         if ':' not in line:
-            raise CalendarError('Invalid calendar event')
+            continue
         key, value = line.split(':', 1)
         name, _, raw_params = key.partition(';')
         params = {}
@@ -237,15 +237,18 @@ def parse_ics(raw):
             continue
         if name in ignored and name not in allowed:
             continue
-        if name not in allowed and (name.startswith('X-') or re.fullmatch(r'[A-Z][A-Z0-9-]{1,63}', name)):
+        if name not in allowed:
             continue
-        if name not in allowed or name in event:
+        if name in event:
             raise CalendarError('Unsupported calendar event')
         event[name] = (value, params) if name in {'DTSTART', 'DTEND'} else value
     if not {'UID', 'DTSTART'} <= set(event) or ('DTEND' in event and 'DURATION' in event) or not ({'DTEND', 'DURATION'} & set(event)):
         raise CalendarError('Invalid calendar event')
-    start_dt, all_day = _ical_datetime(*event['DTSTART'])
-    end_dt = _ical_datetime(*event['DTEND'])[0] if 'DTEND' in event else start_dt + _duration(event['DURATION'])
+    try:
+        start_dt, all_day = _ical_datetime(*event['DTSTART'])
+        end_dt = _ical_datetime(*event['DTEND'])[0] if 'DTEND' in event else start_dt + _duration(event['DURATION'])
+    except CalendarError as exc:
+        raise CalendarError(f'{exc} (event fields: {sorted(k.split(";")[0].upper() for k in event)})') from None
     if end_dt <= start_dt:
         raise CalendarError('Invalid calendar event')
     result = {'uid': event['UID'][:255], 'start': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'), 'end': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'), 'summary': _unescape(event.get('SUMMARY', ''))}
