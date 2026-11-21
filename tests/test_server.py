@@ -259,7 +259,7 @@ class MCPTests(unittest.TestCase):
         responses = [json.loads(x) for x in proc.stdout.splitlines()]
         self.assertEqual([r['id'] for r in responses], [1, 2, 3, 4])
         self.assertEqual(responses[0]['result']['protocolVersion'], '2025-06-18')
-        self.assertEqual([t['name'] for t in responses[1]['result']['tools']], ['list_folders', 'list_messages', 'read_message'])
+        self.assertEqual([t['name'] for t in responses[1]['result']['tools']], ['list_folders', 'list_messages', 'read_message', 'list_calendars', 'list_events', 'get_event', 'create_event', 'update_event', 'delete_event'])
         self.assertTrue(responses[2]['result']['isError'])
         self.assertIn('credentials', responses[2]['result']['content'][0]['text'])
 
@@ -282,7 +282,7 @@ class MCPTests(unittest.TestCase):
         self.assertEqual([r['id'] for r in responses], [1, None, 2, 3, 4, 5, 6])
         self.assertEqual([responses[i]['error']['code'] for i in (0, 1, 2, 4, 5)], [-32002, -32600, -32602, -32002, -32602])
         self.assertEqual(responses[3]['result']['protocolVersion'], server.LATEST_PROTOCOL)
-        self.assertEqual(len(responses[-1]['result']['tools']), 3)
+        self.assertEqual(len(responses[-1]['result']['tools']), 9)
 
     def test_stdio_tool_call_with_synthetic_imap(self):
         program = '''
@@ -392,12 +392,39 @@ with patch.object(mail.BoundedIMAP, "_create_socket", return_value=FakeSocket())
                     version = initialized.model_dump(by_alias=True)['protocolVersion']
                     self.assertIn(version, server.PROTOCOLS)
                     tools = await client.list_tools()
-                    self.assertEqual(len(tools.tools), 3)
+                    self.assertEqual(len(tools.tools), 9)
                     result = await client.call_tool('read_message', {'uid': '42'})
                     self.assertFalse(result.model_dump(by_alias=True)['isError'])
                     self.assertEqual(json.loads(result.content[0].text)['text'], 'Hello fixture!')
         with mock.patch.dict(os.environ, {}, clear=True):
             asyncio.run(exercise())
+
+class CalendarDispatchTests(unittest.TestCase):
+    def call(self, name, arguments):
+        session = server.Session()
+        server.dispatch({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': server.LATEST_PROTOCOL, 'capabilities': {}, 'clientInfo': {'name': 't', 'version': '1'}}}, session)
+        server.dispatch({'jsonrpc': '2.0', 'method': 'notifications/initialized'}, session)
+        return server.dispatch({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}}, session)
+
+    def test_calendar_tools_route_to_calendar_module(self):
+        args = {'calendar_id': 'Y2Fs', 'start': '2027-01-01T00:00:00Z', 'end': '2027-01-02T00:00:00Z'}
+        with mock.patch.object(server.calendar, 'run', return_value={'events': []}) as run, mock.patch.object(server.mail, 'run', side_effect=AssertionError('mail must not run')), mock.patch.dict(os.environ, {'ICLOUD_EMAIL': 'fake@example.invalid', 'ICLOUD_APP_PASSWORD': 'fake-password'}):
+            response = self.call('list_events', args)
+        self.assertFalse(response['result']['isError'])
+        run.assert_called_once_with('list_events', args, 'fake@example.invalid', 'fake-password')
+
+    def test_calendar_schema_rejects_weak_etags_extra_keys_and_long_text(self):
+        base = {'calendar_id': 'Y2Fs', 'event_id': 'ZXZlbnQ', 'summary': 'x', 'start': '2027-01-01T10:00:00Z', 'end': '2027-01-01T11:00:00Z'}
+        with mock.patch.dict(os.environ, {'ICLOUD_EMAIL': 'fake@example.invalid', 'ICLOUD_APP_PASSWORD': 'fake-password'}):
+            weak = self.call('delete_event', {'calendar_id': 'Y2Fs', 'event_id': 'ZXZlbnQ', 'etag': 'W/"v1"'})
+            extra = self.call('create_event', {**base, 'recurrence': 'FREQ=DAILY'})
+            long_text = self.call('create_event', {**base, 'summary': 'x' * 4097})
+        for response in (weak, extra, long_text):
+            self.assertEqual(response['error']['code'], -32602)
+        create = {k: v for k, v in base.items() if k != 'event_id'}
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(self.call('create_event', create)['result']['isError'])
+
 
 if __name__ == '__main__':
     unittest.main()

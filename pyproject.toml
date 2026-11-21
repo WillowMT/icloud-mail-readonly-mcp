@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "icloud-mail-readonly-mcp"
-version = "0.1.0"
-description = "A bounded, read-only iCloud Mail MCP stdio server"
+version = "0.2.0"
+description = "A bounded iCloud Mail and Calendar MCP stdio server"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
