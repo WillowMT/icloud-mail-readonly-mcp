@@ -223,6 +223,8 @@ def parse_ics(raw):
             continue
         if name in ignored and name not in allowed:
             continue
+        if name not in allowed and (name.startswith('X-') or re.fullmatch(r'[A-Z][A-Z0-9-]{1,63}', name)):
+            continue
         if name not in allowed or name in event:
             raise CalendarError('Unsupported calendar event')
         event[name] = (value, params) if name in {'DTSTART', 'DTEND'} else value
