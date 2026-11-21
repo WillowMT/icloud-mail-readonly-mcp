@@ -100,8 +100,18 @@ class CalendarTests(unittest.TestCase):
 
     def test_list_events_skips_unsupported_items_and_reports_count(self):
         result = self.client.list_events(calendar.encode_id('/calendars/u/work/'), '2027-01-01T00:00:00Z', '2027-01-02T00:00:00Z')
-        self.assertEqual(len(result['events']), 1)
-        self.assertEqual(result['skipped'], 1)
+        self.assertEqual(len(result['events']), 2)
+        self.assertNotIn('skipped', result)
+
+    def test_recurring_event_is_shown_once_and_marked(self):
+        ics = (b'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r\r\nRRULE:FREQ=WEEKLY\r\n'
+               b'DTSTART:20270101T100000Z\r\nDTEND:20270101T110000Z\r\nSEQUENCE:3\r\nTRANSP:OPAQUE\r\n'
+               b'STATUS:CONFIRMED\r\nORGANIZER;CN=Willow:mailto:w@example.invalid\r\n'
+               b'ATTENDEE;CN=A:mailto:a@example.invalid\r\nSUMMARY:Standup\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
+        event = calendar.parse_ics(ics)
+        self.assertEqual(event['summary'], 'Standup')
+        self.assertTrue(event['recurring'])
+        self.assertEqual(set(event), {'uid', 'start', 'end', 'summary', 'recurring'})
 
 
 class ShardDiscoveryTests(unittest.TestCase):

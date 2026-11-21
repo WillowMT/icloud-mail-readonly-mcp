@@ -189,7 +189,7 @@ def _unfold(raw):
 
 
 def parse_ics(raw):
-    """Parse only one simple, non-recurring VEVENT; reject lossy cases."""
+    """Parse one non-recurring VEVENT for display; unknown metadata is ignored, not returned."""
     lines = _unfold(raw)
     if lines[:2] != ['BEGIN:VCALENDAR', 'VERSION:2.0'] or lines[-1:] != ['END:VCALENDAR']:
         raise CalendarError('Unsupported calendar data')
@@ -199,7 +199,10 @@ def parse_ics(raw):
     if start >= end or any(line.startswith(('BEGIN:', 'END:')) for line in lines[2:start] + lines[end + 1:-1]):
         raise CalendarError('Unsupported calendar data')
     event = {}
-    allowed = {'UID', 'DTSTART', 'DTEND', 'SUMMARY', 'DESCRIPTION', 'LOCATION', 'DTSTAMP', 'CREATED', 'LAST-MODIFIED'}
+    ignored = {'ATTACH', 'X-APPLE-STRUCTURED-LOCATION', 'X-WR-CALNAME', 'METHOD', 'PRODID', 'CALSCALE', 'VERSION'}
+    recurring = {'RRULE', 'RDATE', 'EXDATE', 'RECURRENCE-ID'}
+    allowed = {'UID', 'DTSTART', 'DTEND', 'SUMMARY', 'DESCRIPTION', 'LOCATION'}
+    has_recurrence = False
     for line in lines[start + 1:end]:
         if ':' not in line:
             raise CalendarError('Invalid calendar event')
@@ -214,6 +217,12 @@ def parse_ics(raw):
                 if not sep or k.upper() not in {'TZID', 'VALUE'} or k.upper() in params:
                     raise CalendarError('Unsupported calendar event')
                 params[k.upper()] = v
+        name = name.upper()
+        if name in recurring and name not in allowed:
+            has_recurrence = True
+            continue
+        if name in ignored and name not in allowed:
+            continue
         if name not in allowed or name in event:
             raise CalendarError('Unsupported calendar event')
         event[name] = (value, params) if name in {'DTSTART', 'DTEND'} else value
@@ -226,6 +235,8 @@ def parse_ics(raw):
     result = {'uid': event['UID'][:255], 'start': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'), 'end': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'), 'summary': _unescape(event.get('SUMMARY', ''))}
     if all_day:
         result['all_day'] = True
+    if has_recurrence:
+        result['recurring'] = True
     for key in ('DESCRIPTION', 'LOCATION'):
         if key in event:
             result[key.lower()] = _unescape(event[key])
