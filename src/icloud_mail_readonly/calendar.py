@@ -189,21 +189,35 @@ def _unfold(raw):
 
 
 def parse_ics(raw):
-    """Parse one non-recurring VEVENT for display; unknown metadata is ignored, not returned."""
+    """Parse one VEVENT for display; unknown metadata and VTIMEZONE are ignored."""
     lines = _unfold(raw)
-    if lines[:2] != ['BEGIN:VCALENDAR', 'VERSION:2.0'] or lines[-1:] != ['END:VCALENDAR']:
+    if not lines or lines[0] != 'BEGIN:VCALENDAR' or lines[-1] != 'END:VCALENDAR':
         raise CalendarError('Unsupported calendar data')
-    if lines.count('BEGIN:VEVENT') != 1 or lines.count('END:VEVENT') != 1:
+    if 'VERSION:2.0' not in lines[:20]:
         raise CalendarError('Unsupported calendar data')
-    start, end = lines.index('BEGIN:VEVENT'), lines.index('END:VEVENT')
-    if start >= end or any(line.startswith(('BEGIN:', 'END:')) for line in lines[2:start] + lines[end + 1:-1]):
+    blocks, current = [], None
+    for line in lines:
+        if line == 'BEGIN:VEVENT':
+            if current is not None:
+                raise CalendarError('Unsupported calendar data')
+            current = []
+        elif line == 'END:VEVENT':
+            if current is None:
+                raise CalendarError('Unsupported calendar data')
+            blocks.append(current)
+            current = None
+        elif current is not None:
+            current.append(line)
+    if not blocks or current is not None:
         raise CalendarError('Unsupported calendar data')
+    masters = [block for block in blocks if not any(line.upper().startswith(('RECURRENCE-ID', 'EXDATE')) for line in block)]
+    event_lines = masters[0] if masters else blocks[0]
     event = {}
     ignored = {'ATTACH', 'X-APPLE-STRUCTURED-LOCATION', 'X-WR-CALNAME', 'METHOD', 'PRODID', 'CALSCALE', 'VERSION'}
     recurring = {'RRULE', 'RDATE', 'EXDATE', 'RECURRENCE-ID'}
     allowed = {'UID', 'DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'DESCRIPTION', 'LOCATION'}
-    has_recurrence = False
-    for line in lines[start + 1:end]:
+    has_recurrence = len(blocks) > 1
+    for line in event_lines:
         if ':' not in line:
             raise CalendarError('Invalid calendar event')
         key, value = line.split(':', 1)
