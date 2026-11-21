@@ -210,8 +210,8 @@ def parse_ics(raw):
         name, _, raw_params = key.partition(';')
         params = {}
         if raw_params:
-            if name not in {'DTSTART', 'DTEND'}:
-                raise CalendarError('Unsupported calendar event')
+            if name.upper() not in {'DTSTART', 'DTEND'}:
+                continue
             for part in raw_params.split(';'):
                 k, sep, v = part.partition('=')
                 if not sep or k.upper() not in {'TZID', 'VALUE'} or k.upper() in params:
