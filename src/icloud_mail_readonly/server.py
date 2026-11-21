@@ -5,7 +5,7 @@ import re
 import sys
 from . import calendar, mail
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 PROTOCOLS = {'2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25'}
 LATEST_PROTOCOL = max(PROTOCOLS)
 MAILBOX_PATTERN = r'^[\x20-\x7e]{1,255}(?![\s\S])'

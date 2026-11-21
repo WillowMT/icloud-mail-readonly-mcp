@@ -350,6 +350,19 @@ class CalendarClient:
     def _href(self, href):
         return _href_path(href, self.host)
 
+    def _discover_href(self, href):
+        """Accept an allowlisted Apple href during discovery and adopt its shard host."""
+        if not isinstance(href, str) or len(href) > 1536:
+            raise CalendarError('Invalid server calendar resource')
+        parsed = urlsplit(href)
+        if parsed.scheme or parsed.netloc:
+            host, path = validate_endpoint(href)
+            self.host = host
+            return path
+        if parsed.query or parsed.fragment:
+            raise CalendarError('Invalid server calendar resource')
+        return _clean_path(parsed.path)
+
     def _discover(self):
         if self.home:
             return
@@ -358,11 +371,11 @@ class CalendarClient:
             raise CalendarError('Calendar discovery failed')
         root = self._xml(data)
         href = root.findtext('.//{DAV:}current-user-principal/{DAV:}href')
-        self.principal = self._href(href)
+        self.principal = self._discover_href(href)
         status, _, data = self._request('PROPFIND', self.principal, {'Depth': '0', 'Content-Type': 'application/xml'}, b'<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-home-set/></d:prop></d:propfind>', True)
         if status != 207:
             raise CalendarError('Calendar discovery failed')
-        self.home = self._href(self._xml(data).findtext('.//{urn:ietf:params:xml:ns:caldav}calendar-home-set/{DAV:}href'))
+        self.home = self._discover_href(self._xml(data).findtext('.//{urn:ietf:params:xml:ns:caldav}calendar-home-set/{DAV:}href'))
         if not self.home.endswith('/'):
             self.home += '/'
 

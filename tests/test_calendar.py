@@ -104,5 +104,27 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(result['skipped'], 1)
 
 
+class ShardDiscoveryTests(unittest.TestCase):
+    def test_discovery_adopts_allowlisted_shard_host(self):
+        class Transport:
+            def request(self, method, target, headers=None, body=b''):
+                if target == '/':
+                    return 207, {}, b'<d:multistatus xmlns:d="DAV:"><d:response><d:href>/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>https://p12-caldav.icloud.com/1/principal/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>'
+                if target == '/1/principal/':
+                    return 207, {}, b'<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/1/principal/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>https://p12-caldav.icloud.com/1/calendars/</d:href></c:calendar-home-set></d:prop></d:propstat></d:response></d:multistatus>'
+                raise AssertionError((method, target))
+        client = calendar.CalendarClient('u', 'p', Transport())
+        client._discover()
+        self.assertEqual(client.host, 'p12-caldav.icloud.com')
+        self.assertEqual(client.home, '/1/calendars/')
+
+    def test_discovery_rejects_untrusted_absolute_href(self):
+        class Transport:
+            def request(self, method, target, headers=None, body=b''):
+                return 207, {}, b'<d:multistatus xmlns:d="DAV:"><d:response><d:href>/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>https://evil.invalid/p/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>'
+        with self.assertRaises(calendar.CalendarError):
+            calendar.CalendarClient('u', 'p', Transport())._discover()
+
+
 if __name__ == '__main__':
     unittest.main()
